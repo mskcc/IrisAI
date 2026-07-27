@@ -1,0 +1,117 @@
+Bootstrap: localimage
+From: /path/to/your/mcp_servers_v2.sif  # Replace with built v2 image path
+
+%post
+  # Replace the startup script with MCP_SERVER_FILTER-aware version
+  cat > /opt/start_mcp_servers.sh << 'EOF'
+#!/bin/bash
+
+# Activate conda environment
+source /opt/miniforge3/bin/activate mcptool001
+
+# Directory containing MCP server scripts
+MCP_SERVERS_DIR="/external/mcp_servers"
+WORK_DIR="${WORK_DIR}"
+
+# Check if directory exists
+if [[ ! -d "$MCP_SERVERS_DIR" ]]; then
+    echo "ERROR: MCP servers directory not found: $MCP_SERVERS_DIR"
+    exit 1
+fi
+
+if [[ ! -d "$WORK_DIR" ]]; then
+    echo "ERROR: Work directory not found: $WORK_DIR"
+    exit 1
+fi
+
+if [[ ! -w "$WORK_DIR" ]]; then
+    echo "ERROR: Work directory is not writable: $WORK_DIR"
+    exit 1
+fi
+
+echo "Work directory: $WORK_DIR"
+echo "MCP servers directory: $MCP_SERVERS_DIR"
+
+# Array to store background process PIDs
+declare -a pids=()
+
+# Function to cleanup background processes
+cleanup() {
+    echo "Shutting down MCP servers..."
+    for pid in "${pids[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping process $pid"
+            kill "$pid"
+        fi
+    done
+    wait
+    echo "All MCP servers stopped."
+}
+
+# Set up signal handlers
+trap cleanup SIGTERM SIGINT
+
+echo "Starting MCP servers from directory: $MCP_SERVERS_DIR"
+
+# MCP_SERVER_FILTER: comma-separated list of server names to start.
+# If set, only matching scripts are launched. If empty/unset, start all.
+if [[ -n "$MCP_SERVER_FILTER" ]]; then
+    echo "MCP_SERVER_FILTER: $MCP_SERVER_FILTER (selective start)"
+    IFS=',' read -ra FILTER_LIST <<< "$MCP_SERVER_FILTER"
+    for server_name in "${FILTER_LIST[@]}"; do
+        server_name=$(echo "$server_name" | xargs)  # trim whitespace
+        script="${MCP_SERVERS_DIR}/${server_name}.py"
+        if [[ -f "$script" ]]; then
+            echo "Starting MCP server: ${server_name}.py"
+            WORK_DIR="$WORK_DIR" python "$script" &
+            pid=$!
+            pids+=($pid)
+            echo "Started ${server_name}.py with PID: $pid"
+            sleep 2
+        else
+            echo "WARNING: Server script not found: $script"
+        fi
+    done
+else
+    echo "MCP_SERVER_FILTER: (not set, starting all servers)"
+    for script in "$MCP_SERVERS_DIR"/*.py; do
+        if [[ -f "$script" ]]; then
+            script_name=$(basename "$script")
+            echo "Starting MCP server: $script_name"
+            WORK_DIR="$WORK_DIR" python "$script" &
+            pid=$!
+            pids+=($pid)
+            echo "Started $script_name with PID: $pid"
+            sleep 2
+        fi
+    done
+fi
+
+if [[ ${#pids[@]} -eq 0 ]]; then
+    echo "No MCP server scripts found/matched in $MCP_SERVERS_DIR"
+    exit 1
+fi
+
+echo "All MCP servers started. PIDs: ${pids[*]}"
+echo "Waiting for servers to finish..."
+
+# Wait for all background processes
+wait
+
+echo "All MCP servers have exited."
+EOF
+
+  chmod +x /opt/start_mcp_servers.sh
+
+%environment
+  export PATH="/opt/miniforge3/bin:$PATH"
+  export CONDA_PREFIX="/opt/miniforge3"
+
+%runscript
+  # Default: activate environment and run command
+  source /opt/miniforge3/bin/activate mcptool001
+  exec "$@"
+
+%startscript
+  # For daemon mode - start filtered MCP servers
+  exec /opt/start_mcp_servers.sh

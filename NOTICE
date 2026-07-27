@@ -1,0 +1,16 @@
+IrisAI
+Copyright 2026 Memorial Sloan Kettering Cancer Center
+
+This product includes software developed by Lohit Valleru and the
+HPC Engineering team at Memorial Sloan Kettering Cancer Center.
+
+This software was developed as part of research into AI-assisted
+high-performance computing for cancer research. IrisAI is an agentic
+AI system that enables cancer researchers to interact with HPC clusters
+using natural language.
+
+If you use IrisAI in your research, please cite:
+
+  Lohit Valleru et al. "Empowering Cancer Researchers: An Agentic AI
+  System for Intuitive Interaction with High-Performance Computing."
+  PEARC 2026.

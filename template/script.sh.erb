@@ -1,0 +1,278 @@
+#!/usr/bin/env bash
+echo "Starting main script with Singularity containers..."
+echo "TTT - $(date)"
+
+set -x
+
+# Container paths
+CONTAINER_DIR="${CONTAINER_DIR:-/path/to/your/containers}"
+MCP_CONTAINER="${MCP_CONTAINER:-${CONTAINER_DIR}/mcp_servers_v3.sif}"
+CHAINLIT_CONTAINER="${CHAINLIT_CONTAINER:-${CONTAINER_DIR}/chainlit.sif}"
+SEARXNG_CONTAINER="${SEARXNG_CONTAINER:-${CONTAINER_DIR}/searxng-auth-single.img}"
+SINGULARITY="${SINGULARITY:-singularity}"
+APP_DIR="${APP_DIR:-/home/${USERNAME}/ondemand/dev/${IRISAI_APP_NAME}}"
+
+# Get username for OnDemand directory
+USERNAME="${USER}"
+[[ -z "$USERNAME" ]] && USERNAME="$(whoami)"
+
+# Validate and prepare work directory
+WORK_DIR="<%= context.work_directory %>"
+if [[ -z "$WORK_DIR" ]]; then
+    echo "ERROR: Work directory not specified"
+    exit 1
+fi
+
+# Expand any environment variables in work directory path
+WORK_DIR=$(eval echo "$WORK_DIR")
+
+# Create work directory if it doesn't exist
+if [[ ! -d "$WORK_DIR" ]]; then
+    echo "Creating work directory: $WORK_DIR"
+    mkdir -p "$WORK_DIR" || {
+        echo "ERROR: Cannot create work directory: $WORK_DIR"
+        exit 1
+    }
+fi
+
+# Test write permissions
+if [[ ! -w "$WORK_DIR" ]]; then
+    echo "ERROR: Work directory is not writable: $WORK_DIR"
+    exit 1
+fi
+
+echo "Using work directory: $WORK_DIR"
+
+# OnDemand session directory (needs to be writable)
+ONDEMAND_DIR="/home/${USERNAME}/ondemand"
+IRISAI_DIR="/home/${USERNAME}/${IRISAI_APP_NAME}"
+
+# Create necessary directories
+mkdir -p "${ONDEMAND_DIR}" "${IRISAI_DIR}"
+
+echo "Starting chainlit front-end server in container"
+
+# Get LiteLLM API key
+# Generate a per-user LiteLLM virtual key using your institution's key generation mechanism.
+# This typically calls a privileged script that POSTs to the LiteLLM /key/generate endpoint.
+# Set LITELLM_KEY_GENERATOR_CMD to the path of your key generation script.
+# Example: export LITELLM_KEY_GENERATOR_CMD="/opt/scripts/generate_litellm_key.sh"
+VIRTUAL_KEY=$(${LITELLM_KEY_GENERATOR_CMD:-} 2>/dev/null)
+
+if [[ -z "$VIRTUAL_KEY" ]]; then
+    echo "ERROR: Failed to obtain LiteLLM API key for user $USERNAME" >&2
+    exit 1
+fi
+
+echo "Received API keys for user $USERNAME"
+
+echo "Starting MCP servers in containers (dynamic discovery)"
+
+# Build /data1 bind mounts: each subdir explicitly as read-only
+# (Mounting /data1 as a whole may not enforce :ro on sub-mounted filesystems)
+set +x
+DATA1_BINDS=""
+for subdir in /data1/*/; do
+  [[ -d "$subdir" ]] || continue
+  DATA1_BINDS="${DATA1_BINDS} -B ${subdir}:${subdir}:ro"
+done
+echo "[data1 binds] $(echo $DATA1_BINDS | wc -w) bind mounts configured"
+set -x
+
+# ── Security: /tmp containment ──
+# Redirect container /tmp to WORK_DIR/.tmp so writes never reach host /tmp
+mkdir -p ${WORK_DIR}/.tmp
+
+# ── Instance 1: Job submitters (slurm_management + bio_processing) ──
+# Full slurm access (sbatch/srun/salloc available)
+$SINGULARITY instance start \
+  --no-mount tmp \
+  -B /etc/centrifydc \
+  -B /etc/nsswitch.conf \
+  -B /var/centrifydc \
+  -B /var/run/munge:/var/run/munge \
+  ${DATA1_BINDS} \
+  -B /admin:/admin:ro \
+  -B /home:/home:ro \
+  -B /home/${USERNAME}:/home/${USERNAME}:ro \
+  -B ${ONDEMAND_DIR}:${ONDEMAND_DIR}:rw \
+  -B ${IRISAI_DIR}:${IRISAI_DIR}:rw \
+  -B /scratch:/scratch:ro \
+  ${SINGULARITY_EXTRA_BINDS:+-B ${SINGULARITY_EXTRA_BINDS}} \
+  -B ${WORK_DIR}:${WORK_DIR}:rw \
+  -B ${WORK_DIR}/.tmp:/tmp:rw \
+  -B ${APP_DIR}:/external:ro \
+  -B ${PWD}:/current_session:ro \
+  -B $(dirname ${PWD}):/all_sessions:ro \
+  --env LITELLM_VIRTUAL_KEY="${VIRTUAL_KEY}" \
+  --env MCP_BIO_PROCESS_PORT=${MCP_BIO_PROCESS_PORT} \
+  --env MCP_SLURM_PORT=${MCP_SLURM_PORT} \
+  --env MCP_SHARED_BEARER_TOKEN="${MCP_SHARED_BEARER_TOKEN}" \
+  --env WORK_DIR="${WORK_DIR}" \
+  --env IRISAI_APP_NAME="${IRISAI_APP_NAME}" \
+  --env CURRENT_SESSION_DIR="/current_session" \
+  --env ALL_SESSIONS_DIR="/all_sessions" \
+  --env MCP_SERVER_FILTER="slurm_management,bio_processing" \
+  ${MCP_CONTAINER} \
+  mcp_submitters_instance
+
+# ── Instance 2: Executors (code_execution + file_ops) ──
+# sbatch/srun/salloc MASKED — cannot submit jobs
+$SINGULARITY instance start \
+  --no-mount tmp \
+  -B /etc/centrifydc \
+  -B /etc/nsswitch.conf \
+  -B /var/centrifydc \
+  -B /var/run/munge:/var/run/munge \
+  ${DATA1_BINDS} \
+  -B /admin:/admin:ro \
+  -B /home:/home:ro \
+  -B /home/${USERNAME}:/home/${USERNAME}:ro \
+  -B ${ONDEMAND_DIR}:${ONDEMAND_DIR}:rw \
+  -B ${IRISAI_DIR}:${IRISAI_DIR}:rw \
+  -B /scratch:/scratch:ro \
+  ${SINGULARITY_EXTRA_BINDS:+-B ${SINGULARITY_EXTRA_BINDS}} \
+  -B ${WORK_DIR}:${WORK_DIR}:rw \
+  -B ${WORK_DIR}/.tmp:/tmp:rw \
+  -B ${APP_DIR}:/external:ro \
+  -B ${PWD}:/current_session:ro \
+  -B $(dirname ${PWD}):/all_sessions:ro \
+  -B /dev/null:/usr/bin/sbatch \
+  -B /dev/null:/usr/bin/srun \
+  -B /dev/null:/usr/bin/salloc \
+  --env LITELLM_VIRTUAL_KEY="${VIRTUAL_KEY}" \
+  --env MCP_FILE_PORT=${MCP_FILE_PORT} \
+  --env MCP_CODE_EXECUTION_PORT=${MCP_CODE_EXECUTION_PORT} \
+  --env MCP_HISTORY_PORT=${MCP_HISTORY_PORT} \
+  --env MCP_SHARED_BEARER_TOKEN="${MCP_SHARED_BEARER_TOKEN}" \
+  --env WORK_DIR="${WORK_DIR}" \
+  --env IRISAI_APP_NAME="${IRISAI_APP_NAME}" \
+  --env CURRENT_SESSION_DIR="/current_session" \
+  --env ALL_SESSIONS_DIR="/all_sessions" \
+  --env MCP_SERVER_FILTER="code_execution,file_ops" \
+  ${MCP_CONTAINER} \
+  mcp_executors_instance
+
+# Start Searxng server
+#
+mkdir -p ${IRISAI_DIR}/searxng/config ${IRISAI_DIR}/searxng/data ${IRISAI_DIR}/searxng/tmp ${IRISAI_DIR}/searxng/socket
+
+$SINGULARITY instance start \
+  --bind ${IRISAI_DIR}/searxng/config:/etc/searxng \
+  --bind ${IRISAI_DIR}/searxng/data:/var/cache/searxng \
+  --bind ${IRISAI_DIR}/searxng/socket:/searxng-socket \
+  --bind ${IRISAI_DIR}/searxng/tmp:/tmp \
+  --env NGINX_PORT=${SEARXNG_NGINX_PORT} \
+  --env AUTH_TOKEN=${SEARXNG_TOKEN} \
+  ${SEARXNG_CONTAINER} \
+  searxng-auth
+
+# Wait for MCP servers and Searxng to start
+
+sleep 15
+
+# ── Start User Extension MCP Servers ──────────────────────────────────────────
+USER_EXT_DIR="/home/${USERNAME}/${IRISAI_APP_NAME}/extensions"
+ACTIVE_PORTS_FILE="${IRISAI_DIR}/extensions/.active_ports.json"
+
+# Clean stale ports file from previous session
+rm -f "$ACTIVE_PORTS_FILE"
+
+if [[ -d "$USER_EXT_DIR" ]]; then
+    mkdir -p "${IRISAI_DIR}/extensions"
+    echo "{" > "$ACTIVE_PORTS_FILE"
+    first=true
+    ext_count=0
+
+    for ext_dir in "$USER_EXT_DIR"/*/; do
+        [[ -d "$ext_dir" ]] || continue
+        manifest="${ext_dir}manifest.yaml"
+        if [[ -f "$manifest" ]]; then
+            ext_name=$(basename "$ext_dir")
+            script=$(grep 'script:' "$manifest" | head -1 | awk '{print $2}' | tr -d '"' | tr -d "'")
+
+            if [[ -n "$script" && -f "${ext_dir}${script}" ]]; then
+                # Dynamically find available port
+                ext_port=$(find_port ${host})
+
+                # Write to ports file for app.py to discover
+                if [[ "$first" == "true" ]]; then
+                    first=false
+                else
+                    echo "," >> "$ACTIVE_PORTS_FILE"
+                fi
+                echo "  \"${ext_name}\": ${ext_port}" >> "$ACTIVE_PORTS_FILE"
+
+                # Launch in the MCP Singularity container
+                $SINGULARITY exec \
+                  -B /home:/home:ro \
+                  -B ${IRISAI_DIR}:${IRISAI_DIR}:rw \
+                  -B ${WORK_DIR}:${WORK_DIR}:rw \
+                  -B ${APP_DIR}:/external:ro \
+                  --env MCP_SERVER_PORT="${ext_port}" \
+                  --env MCP_SHARED_BEARER_TOKEN="${MCP_SHARED_BEARER_TOKEN}" \
+                  --env WORK_DIR="${WORK_DIR}" \
+                  --pwd "${ext_dir}" \
+                  ${MCP_CONTAINER} \
+                  bash -c "source /opt/miniforge3/bin/activate mcptool001 && python ${ext_dir}${script}" &
+
+                echo "Started user extension '${ext_name}' on port ${ext_port}"
+                ext_count=$((ext_count + 1))
+            fi
+        fi
+    done
+
+    echo "}" >> "$ACTIVE_PORTS_FILE"
+
+    if [[ $ext_count -gt 0 ]]; then
+        echo "Started ${ext_count} user extension(s), waiting for startup..."
+        sleep 5
+    fi
+fi
+
+# Cleanup function — must be defined before chainlit foreground exec
+cleanup() {
+    echo "Cleaning up containers..."
+    $SINGULARITY instance stop mcp_submitters_instance 2>/dev/null
+    $SINGULARITY instance stop mcp_executors_instance 2>/dev/null
+    $SINGULARITY instance stop searxng-auth 2>/dev/null
+}
+trap cleanup EXIT
+
+echo "Starting chainlit front-end server in container"
+
+# Setup chainlit directory in current PWD (which is under OnDemand)
+chainlitdir="${PWD}/.chainlit"
+mkdir -p ${chainlitdir}
+cp ${APP_DIR}/.chainlit/config.toml ${chainlitdir}/
+rsync -avP ${APP_DIR}/public ${PWD}
+
+# Launch chainlit in container with read-only mounts
+$SINGULARITY exec \
+  --no-mount tmp \
+  -B /var/run/munge:/var/run/munge \
+  ${DATA1_BINDS} \
+  -B /admin:/admin:ro \
+  -B /home:/home:ro \
+  -B /home/${USERNAME}:/home/${USERNAME}:ro \
+  -B ${ONDEMAND_DIR}:${ONDEMAND_DIR}:rw \
+  -B ${IRISAI_DIR}:${IRISAI_DIR}:rw \
+  -B /scratch:/scratch:ro \
+  ${SINGULARITY_EXTRA_BINDS:+-B ${SINGULARITY_EXTRA_BINDS}} \
+  -B ${WORK_DIR}:${WORK_DIR}:rw \
+  -B ${WORK_DIR}/.tmp:/tmp:rw \
+  -B ${APP_DIR}:/external:ro \
+  -B ${PWD}:/workspace:rw \
+  --env LITELLM_VIRTUAL_KEY="${VIRTUAL_KEY}" \
+  --env MCP_SHARED_BEARER_TOKEN="${MCP_SHARED_BEARER_TOKEN}" \
+  --env NODE_SERVER_PORT="${NODE_SERVER_PORT}" \
+  --env WORK_DIR="${WORK_DIR}" \
+  --env IRISAI_APP_NAME="${IRISAI_APP_NAME}" \
+  --env SEARXNG_NGINX_PORT="${SEARXNG_NGINX_PORT}" \
+  --env SEARXNG_TOKEN="${SEARXNG_TOKEN}" \
+  --pwd /workspace \
+  ${CHAINLIT_CONTAINER} \
+  bash -c "source /opt/miniforge3/bin/activate hpcagent02 && \
+           chainlit run /external/app.py --host 0.0.0.0 --port ${NODE_SERVER_PORT} --root-path \"/node/${host}/${port}\""
+
+echo "TTT - $(date)"

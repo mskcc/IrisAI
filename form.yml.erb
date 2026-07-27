@@ -1,0 +1,98 @@
+# Batch Connect app configuration file
+#
+# @note Used to define the submitted cluster, title, description, and
+#   hard-coded/user-defined attributes that make up this Batch Connect app.
+---
+
+# **MUST** set cluster id here that matches cluster configuration file located
+# under /etc/ood/config/clusters.d/*.yml
+# @example Use the Owens cluster at Ohio Supercomputer Center
+#     cluster: "owens"
+cluster: "iris"
+
+# Define attribute values that aren't meant to be modified by the user within
+# the Dashboard form
+attributes:
+  work_directory:
+    label: "Work Directory"
+    help: |
+      Select a work directory for IrisAI. This is the only location where agents can create, modify, or delete files.
+      Tip: Use a dedicated directory (e.g., /data1/.../irisai_work) rather than an existing project folder. IrisAI can still read and copy files from other locations when needed.
+    widget: "path_selector"
+    directory: "/data1/"
+    show_hidden: false
+    show_files: false
+    favorites:
+    - /data1
+    - /scratch
+    required: true
+  acknowledge_workdir:
+    widget: "check_box"
+    label: "I acknowledge that IrisAI will operate within my selected work directory with full read, write, and delete permissions. Important files that should not be modified can be stored outside the work directory — IrisAI can still access and copy them when needed."
+    required: true
+    cacheable: false
+    html_options:
+      required: true
+      autocomplete: "off"
+    checked_value: 1
+    unchecked_value: 0
+    help: "You must check this box to launch your session."
+  acknowledge_verify:
+    widget: "check_box"
+    label: "I understand that AI-powered tools may produce errors or unexpected results and that I should verify critical outputs before use."
+    required: true
+    cacheable: false
+    html_options:
+      required: true
+      autocomplete: "off"
+    checked_value: 1
+    unchecked_value: 0
+    help: "You must check this box to launch your session."
+  queue:
+    label: "Queue"
+    value: "cpushort"
+  num_cores:
+    widget: "number_field"
+    label: "Number of cores"
+    value: 12
+    help: "Maximum number of CPU cores is 52 per node"
+    min: 1
+    step: 1
+  num_mem:
+    widget: "number_field"
+    label: "Memory required per core"
+    value: 5
+    help: "Maximum amount of total memory is 1T"
+    min: 1
+    step: 1
+  num_mins:
+    value: 60
+    min: 1
+    step: 1
+    help: "Maximum wall time is 1 week"
+  num_gpus:
+    widget: "number_field"
+    label: "Number of GPUs"
+    value: 0
+    help: "Maximum number of GPUs is 4"
+    min: 0
+    step: 1
+
+# All of the attributes that make up the Dashboard form (in respective order),
+# and made available to the submit configuration file and the template ERB
+# files
+#
+# @note You typically do not need to modify this unless you want to add a new
+#   configurable value
+# @note If an attribute listed below is hard-coded above in the `attributes`
+#   option, then it will not appear in the form page that the user sees in the
+#   Dashboard
+form:
+  - work_directory
+  - acknowledge_workdir
+  - acknowledge_verify
+  - queue
+  - num_cores
+  - num_mem
+  - num_mins
+  - num_gpus

@@ -1,0 +1,47 @@
+<%
+  require 'digest'
+
+  # Generate form id, based on host and port
+  form_id = Digest::SHA1.hexdigest("--" + host.to_s + "--" + port.to_s + "--")
+%>
+
+<form id="<%= form_id %>" action="/node/<%= host %>/<%= port %>/login" method="post">
+  <button class="btn btn-primary" type="submit">
+    <i class="fa fa-comments"></i> Connect to IrisAI Dev
+  </button>
+</form>
+
+<div id="error-message" style="display: none; color: red; margin-top: 10px;"></div>
+
+<script type="text/javascript">
+  document.getElementById('<%= form_id %>').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const loginUrl = '/node/<%= host %>/<%= port %>/login';
+    const mainUrl = '/node/<%= host %>/<%= port %>/';
+
+    const formData = new FormData();
+    formData.append('username', "<%= ENV['USER'] %>");
+    formData.append('password', '<%= password %>');
+
+    try {
+      const response = await fetch(loginUrl, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'  // Ensures cookies are sent/set
+      });
+
+      if (response.ok) {
+        window.open(mainUrl, '_blank');
+      } else {
+        const errorDiv = document.getElementById('error-message');
+        errorDiv.textContent = `Login failed with status: ${response.status}. Please try again or contact support.`;
+        errorDiv.style.display = 'block';
+      }
+    } catch (e) {
+      const errorDiv = document.getElementById('error-message');
+      errorDiv.textContent = `Connection error: ${e.message}. Please check your network and try again.`;
+      errorDiv.style.display = 'block';
+    }
+  });
+</script>

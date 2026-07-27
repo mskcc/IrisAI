@@ -1,0 +1,429 @@
+# config/policy.yaml
+# ═══════════════════════════════════════════════════════════════════
+# POLICY ENFORCEMENT LAYER — Universal rules for all tool calls
+# ═══════════════════════════════════════════════════════════════════
+#
+# Rules here apply to ALL tools — current and future.
+# No need to modify individual tool implementations.
+# Adding a rule here = instant enforcement on next session start.
+#
+# DESIGN PRINCIPLES:
+#   1. If it can be code, it must be code (not a prompt)
+#   2. Fail loudly, fail early (structured errors before wasting resources)
+#   3. Universal > per-function (write once, apply everywhere)
+#   4. Deterministic > probabilistic (100% enforcement, not 80%)
+
+version: "1.0"
+
+# ══════════════════════════════════════════════════════════════════
+# GLOBAL LIMITS — Hard cap on total tool calls per turn
+# ══════════════════════════════════════════════════════════════════
+# This is the absolute ceiling regardless of which tools are called.
+# Prevents: runaway agent loops that stay within per-tool budgets
+# but accumulate excessive total cost (e.g. 4 different tools × 6 each = 24).
+# The $53 incident used ~35 tool calls in one turn.
+
+global_limits:
+  max_total_per_turn: 120
+
+
+# ══════════════════════════════════════════════════════════════════
+# CONSECUTIVE LIMITS — Block repeated calls to the same tool
+# ══════════════════════════════════════════════════════════════════
+# Catches the pattern where the LLM loops on one tool instead of
+# using a batch alternative. The redirect_to field tells the LLM
+# which tool to use instead (structured denial feedback).
+# Only tools with known batch alternatives are listed here.
+
+consecutive_limits:
+  execute_dynamic_task:
+    max_consecutive: 4
+    redirect_to: "batch with type='shell' — put ALL your shell commands in ONE batch call instead of calling execute_dynamic_task repeatedly"
+  web_search:
+    max_consecutive: 6
+    redirect_to: "summarize findings from existing searches and report to user"
+  grep_file:
+    max_consecutive: 8
+    redirect_to: "batch (or batch_readonly) with type='grep' for multiple searches in ONE call"
+  read_file_lines:
+    max_consecutive: 8
+    redirect_to: "batch (or batch_readonly) with type='read' for multiple file reads in ONE call"
+  read_text_file:
+    max_consecutive: 10
+    redirect_to: "batch (or batch_readonly) with type='read' for multiple file reads in ONE call"
+  find_files:
+    max_consecutive: 8
+    redirect_to: "batch (or batch_readonly) with type='find' for multiple searches in ONE call"
+  get_file_info:
+    max_consecutive: 10
+    redirect_to: "batch (or batch_readonly) with type='shell' and 'stat' command"
+  edit_file:
+    max_consecutive: 10
+    redirect_to: "batch with type='edit' for multiple edits in ONE call"
+  slurm_monitor_job:
+    max_consecutive: 6
+    redirect_to: "execute_dynamic_task with a polling script"
+
+# ══════════════════════════════════════════════════════════════════
+# TOOL CALL BUDGETS — Hard limits per user turn
+# ══════════════════════════════════════════════════════════════════
+# Prevents: polling loops, install retry spirals, excessive searches
+# Reset at the start of each new user message.
+
+tool_budgets:
+  execute_dynamic_task:
+    max_per_turn: 16
+    warn_at: 12
+    on_exceed: "error"
+    message: >
+      Budget exceeded: execute_dynamic_task called {count}x this turn (max 16).
+      Combine remaining work into fewer calls, or report status to user.
+    warn_message: >
+      BUDGET WARNING: execute_dynamic_task used {count}/{max} calls this turn.
+      You have {remaining} call(s) left. STOP and plan — batch ALL remaining
+      operations into as few calls as possible. Combine independent commands
+      into a single script.
+
+  slurm_monitor_job:
+    max_per_turn: 30
+    warn_at: 20
+    on_exceed: "error"
+    message: >
+      Budget exceeded: slurm_monitor_job called {count}x this turn (max 30).
+      Use wait=True for short jobs, or chain with dependency='afterok:JOB_ID'.
+      Do NOT poll — report status to user if job is still running.
+    warn_message: >
+      BUDGET WARNING: slurm_monitor_job used {count}/{max} calls.
+      Use wait=True to block for short jobs. For multi-step workflows,
+      chain jobs with dependency='afterok:JOB_ID' instead of polling.
+
+  submit_slurm_job:
+    max_per_turn: 30
+    on_exceed: "error"
+    message: >
+      Budget exceeded: submit_slurm_job called {count}x this turn (max 30).
+      If the submission failed, report the error to the user.
+
+
+  lookup_user:
+    max_per_turn: 60
+    on_exceed: "warn"
+    message: >
+      Budget exceeded: lookup_user called {count}x this turn (max 60).
+      Report results so far and continue in the next turn if needed.
+
+  find_files:
+    max_per_turn: 40
+    on_exceed: "error"
+    message: >
+      Budget exceeded: find_files called {count}x this turn (max 40).
+      Use the environment registry or execute_dynamic_task with find.
+
+  grep_file:
+    max_per_turn: 40
+    on_exceed: "error"
+    message: >
+      Budget exceeded: grep_file called {count}x this turn (max 40).
+      Use analyze_files or execute_dynamic_task with grep -rn instead.
+
+  read_file_lines:
+    max_per_turn: 60
+    warn_at: 50
+    on_exceed: "error"
+    message: >
+      Budget exceeded: read_file_lines called {count}x this turn (max 60).
+      Use analyze_files or get_file_overview for bulk reading.
+
+  web_search:
+    max_per_turn: 10
+    on_exceed: "error"
+    message: "Budget exceeded: Summarize findings from existing searches."
+
+  read_text_file:
+    max_per_turn: 60
+    warn_at: 50
+    on_exceed: "error"
+    message: >
+      Budget exceeded: read_text_file called {count}x this turn (max 60).
+      Use analyze_files for reading multiple files at once.
+
+  list_directory:
+    max_per_turn: 50
+    warn_at: 40
+    on_exceed: "error"
+    message: >
+      Budget exceeded: list_directory called {count}x this turn (max 50).
+      Use find_files with a specific pattern or execute_dynamic_task with ls/find.
+
+  get_file_info:
+    max_per_turn: 20
+    on_exceed: "error"
+    message: >
+      Budget exceeded: get_file_info called {count}x this turn (max 20).
+      Batch file checks into a single execute_dynamic_task call.
+
+  check_directory_exists:
+    max_per_turn: 16
+    on_exceed: "error"
+    message: >
+      Budget exceeded: check_directory_exists called {count}x this turn (max 16).
+      Combine directory checks into a single execute_dynamic_task call.
+
+  read_file_head:
+    max_per_turn: 16
+    on_exceed: "error"
+    message: >
+      Budget exceeded: read_file_head called {count}x this turn (max 16).
+      Use analyze_files for multiple files.
+
+  read_file_tail:
+    max_per_turn: 16
+    on_exceed: "error"
+    message: >
+      Budget exceeded: read_file_tail called {count}x this turn (max 16).
+      Use analyze_files for multiple files.
+
+  get_file_overview:
+    max_per_turn: 16
+    on_exceed: "error"
+    message: >
+      Budget exceeded: get_file_overview called {count}x this turn (max 16).
+      Use analyze_files for bulk file inspection.
+
+  edit_file:
+    max_per_turn: 16
+    on_exceed: "error"
+    message: >
+      Budget exceeded: edit_file called {count}x this turn (max 16).
+      Use batch_file_edit to apply multiple edits in one operation.
+
+  # Default for any tool not explicitly listed
+  _default:
+    max_per_turn: 30
+    on_exceed: "error"
+    message: >
+      Budget exceeded: {tool_name} called {count}x this turn (max 30).
+      Stop and report current status to the user. Do NOT retry.
+
+
+# ══════════════════════════════════════════════════════════════════
+# BLOCKED PATTERNS — Commands that are NEVER allowed
+# ══════════════════════════════════════════════════════════════════
+# Applied to ALL string values in tool_input.
+# If any pattern matches, the tool call is blocked BEFORE execution.
+# Prevents: broad filesystem searches, unauthorized installs, dangerous ops
+
+blocked_patterns:
+  # ── Broad filesystem searches (depth guardrails) ──
+  - pattern: "find / "
+    reason: "Broad filesystem search from root is forbidden"
+    suggestion: "Check config/environment.yaml or ask the user for the path"
+    scope: command
+
+  - pattern: "find /data1"
+    unless_contains: "-maxdepth"
+    min_path_depth: 3
+    reason: "find on /data1 without -maxdepth will timeout (300s limit). Add depth limit."
+    suggestion: "Add -maxdepth 3 (or narrower) to prevent timeout. Example: find /data1/user/project -maxdepth 3 -name '*.py'"
+    scope: command
+
+  - pattern: "find /opt"
+    unless_contains: "-maxdepth"
+    min_path_depth: 3
+    reason: "find on /opt without -maxdepth will timeout (300s limit). Add depth limit."
+    suggestion: "Add -maxdepth 3 or check config/environment.yaml for known paths"
+    scope: command
+
+  - pattern: "find /usr"
+    unless_contains: "-maxdepth"
+    min_path_depth: 3
+    reason: "find on /usr without -maxdepth will timeout (300s limit). Add depth limit."
+    suggestion: "Add -maxdepth 3 or ask the user for a more specific path"
+    scope: command
+
+  - pattern: "find /home"
+    unless_contains: "-maxdepth"
+    min_path_depth: 3
+    reason: "find on /home without -maxdepth will timeout. Add depth limit."
+    suggestion: "Add -maxdepth 3 or narrow to a specific user's directory"
+    scope: command
+
+  - pattern: "find /usersoftware"
+    unless_contains: "-maxdepth"
+    min_path_depth: 3
+    reason: "find on /usersoftware without -maxdepth will timeout. Add depth limit."
+    suggestion: "Add -maxdepth 3 or check config/environment.yaml for known paths"
+    scope: command
+
+  # ── Unauthorized software installation ──
+  - pattern: "rpm -i"
+    reason: "Software installation requires explicit user approval first"
+    suggestion: "Propose the installation to the user and wait for explicit approval before executing"
+    scope: command
+
+  - pattern: "rpm --install"
+    reason: "Software installation requires explicit user approval first"
+    suggestion: "Propose the installation to the user and wait for explicit approval"
+    scope: command
+
+  - pattern: "apt-get install"
+    reason: "Software installation requires explicit user approval first"
+    suggestion: "Propose the installation to the user and wait for explicit approval"
+    scope: command
+
+  - pattern: "pip install"
+    reason: "Package installation requires explicit user approval first"
+    suggestion: "Propose the installation to the user and wait for explicit approval"
+    requires_approval: true  # Show Yes/No button instead of hard-blocking
+    scope: command  # Only match in command-execution tools, not file content
+    exceptions:
+      - "pip install --user"  # user-space installs may be allowed with approval
+
+  # ── Dangerous operations: rm -rf ──
+  - pattern: "rm -rf /"
+    exact_boundary: true
+    reason: "Recursive deletion of root filesystem is absolutely forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /usr"
+    reason: "Recursive deletion of system directory /usr is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /bin"
+    reason: "Recursive deletion of system directory /bin is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /etc"
+    reason: "Recursive deletion of system directory /etc is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /var"
+    reason: "Recursive deletion of system directory /var is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /opt"
+    reason: "Recursive deletion of system directory /opt is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /sys"
+    reason: "Recursive deletion of system directory /sys is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /proc"
+    reason: "Recursive deletion of system directory /proc is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /dev"
+    reason: "Recursive deletion of system directory /dev is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /boot"
+    reason: "Recursive deletion of system directory /boot is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "rm -rf /sbin"
+    reason: "Recursive deletion of system directory /sbin is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  # General rm -rf: approval gate for workspace deletions
+  - pattern: "rm -rf"
+    reason: "Recursive forced deletion requires user approval"
+    suggestion: "Ask the user to confirm the deletion target is correct"
+    requires_approval: true
+    scope: command
+
+  # ── Other dangerous operations ──
+  - pattern: "> /dev/sd"
+    reason: "Writing to block device files is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "> /dev/mem"
+    reason: "Writing to /dev/mem is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "> /dev/kmem"
+    reason: "Writing to /dev/kmem is forbidden"
+    suggestion: "This operation is never allowed"
+    scope: command
+
+  - pattern: "chmod 777"
+    reason: "World-writable permissions are a security risk"
+    suggestion: "Use more restrictive permissions (755 for dirs, 644 for files)"
+
+
+# ══════════════════════════════════════════════════════════════════
+# REQUIRED PARAMETERS — Must be present for tool to execute
+# ══════════════════════════════════════════════════════════════════
+# Prevents: bare-metal job execution, missing critical params
+# These are STRONGER than the tool's own validation.
+
+required_params:
+  submit_slurm_job:
+    - param: "container_image"
+      reason: >
+        All Slurm jobs MUST run inside a container.
+        Bare-metal job execution is not allowed.
+        Use a container from config/environment.yaml.
+
+
+# ══════════════════════════════════════════════════════════════════
+# PRECONDITION CHECKS — Validated before execution
+# ══════════════════════════════════════════════════════════════════
+# These check that referenced resources actually exist.
+# Prevents: submitting jobs with non-existent containers, wrong paths
+
+preconditions:
+  submit_slurm_job:
+    - check: "file_exists"
+      param: "container_image"
+      reason: "Container image file must exist on disk before job submission"
+      on_fail: "error"  # hard block
+
+    - check: "in_environment_registry"
+      param: "container_image"
+      field: "containers"  # check against containers section of environment.yaml
+      reason: "Container should be registered in config/environment.yaml"
+      on_fail: "warn"  # warn but allow (container may be legitimately new)
+
+    - check: "script_paths_in_workdir"
+      param: "script_content"
+      reason: "Script must not write outside the work directory"
+      on_fail: "error"  # hard block — workdir escape is forbidden
+
+
+# ══════════════════════════════════════════════════════════════════
+# AUDIT LOGGING — Track all policy decisions
+# ══════════════════════════════════════════════════════════════════
+
+audit:
+  enabled: true
+  log_file: "logs/policy_audit.jsonl"
+  log_blocked: true       # always log blocked calls
+  log_warnings: true      # log warnings (soft violations)
+  log_allowed: false      # don't log every allowed call (too noisy)
+  include_tool_input: true  # include args in audit log
+
+
+# ══════════════════════════════════════════════════════════════════
+# PROTOCOL MODE — Reproducible execution enforcement
+# ══════════════════════════════════════════════════════════════════
+
+protocol:
+  enabled: true
+  auto_approve: false       # require user approval before execution
+  protocols_dir: "protocols/"  # relative to work_dir
+  hard_stop_on_deviation: true  # HARD STOP if tool call deviates from protocol
+  max_steps: 50             # maximum steps in a single protocol

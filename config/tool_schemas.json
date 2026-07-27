@@ -1,0 +1,1375 @@
+{
+  "_meta": {
+    "description": "Canonical tool schemas for all IrisAI MCP server tools. Single source of truth for tool descriptions, parameter constraints, and anti-patterns. Each tool follows the 5-question standard: (1) WHAT it does, (2) WHEN to call it, (3) WHEN NOT to call it, (4) WHAT each parameter means with constraints, (5) WHAT it returns.",
+    "last_updated": "2026-02-28",
+    "version": "1.0.0",
+    "servers": [
+      "file_ops",
+      "bio_processing",
+      "slurm_management",
+      "code_execution",
+      "history_management"
+    ]
+  },
+  "file_ops": {
+    "get_user_settings": {
+      "name": "get_user_settings",
+      "description": "Load the current user's persistent settings from disk. Call this at the start of any workflow to get work_dir, project_name, weights_path, and software_paths. Takes no parameters \u2014 uses the OS username automatically. Returns dict with settings including work_dir, project_name, weights_path (if set), and software_paths (list of directory hints where user-installed software may be found). DO NOT call this repeatedly in the same conversation \u2014 call once and reuse the values.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    "list_directory": {
+      "name": "list_directory",
+      "description": "List files and subdirectories in a directory. Call this to explore directory contents or verify files exist before operating on them. DO NOT call this on very large directories with thousands of files \u2014 use find_files with a specific pattern instead. Returns file names, sizes, types, and modification times.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the directory. Must start with /. No relative paths.",
+            "pattern": "^/"
+          },
+          "show_hidden": {
+            "type": "boolean",
+            "description": "If true, include files starting with '.' (default: false)."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "find_files": {
+      "name": "find_files",
+      "description": "Search for files matching a glob pattern, optionally recursive. Call this to locate specific files by name or extension when you know the pattern. Prefer this over list_directory when searching. DO NOT use overly broad patterns like '*' in large directory trees \u2014 be specific (e.g. '*.fasta', '*.json'). Returns list of matching absolute file paths.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern like '*.fasta', 'fold_input*.json', '*.pdb'. Be specific to avoid huge result sets."
+          },
+          "start_path": {
+            "type": "string",
+            "description": "Absolute path to start searching from. Must start with /.",
+            "pattern": "^/"
+          },
+          "recursive": {
+            "type": "boolean",
+            "description": "Search subdirectories recursively (default: true)."
+          },
+          "max_depth": {
+            "type": "integer",
+            "description": "Maximum directory depth to search (default: 5). Keep low for performance.",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "pattern",
+          "start_path"
+        ]
+      }
+    },
+    "read_text_file": {
+      "name": "read_text_file",
+      "description": "Read the full content of a small text file (<50KB) and return it as a string. Call this for config files, scripts, logs, JSON, markdown, or small text files. DO NOT call this for: (1) FASTA/sequence files \u2014 pass the file path directly to bio tools like prepare_af3_json_from_sequences or mutate_fasta instead, (2) files over 50KB \u2014 use get_file_overview, read_file_head, or grep_file instead, (3) binary files. Returns error if file exceeds 50KB. If you get a 'File too large' error, switch to large file tools immediately \u2014 do NOT retry this tool on the same file.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the text file. Must start with /. Do NOT pass FASTA file paths here \u2014 pass them directly to bio tools instead.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "write_text_file": {
+      "name": "write_text_file",
+      "description": "Write text content to a file, creating parent directories if needed. Call this ONCE per file to save scripts, configs, notes, or generated content. Path MUST be within the user's work directory (WORK_DIR). DO NOT call this with empty content or placeholder values like '{}' or '[]'. DO NOT use this to write FASTA files \u2014 bio tools handle that internally. Returns success status and the written path.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path for the file. Must start with / and be inside WORK_DIR. No relative paths.",
+            "pattern": "^/"
+          },
+          "content": {
+            "type": "string",
+            "description": "The actual text content to write. Must be non-empty. No placeholders. No empty strings."
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ]
+      }
+    },
+    "remove_file": {
+      "name": "remove_file",
+      "description": "Delete a file from disk permanently. Path MUST be within the user's work directory (WORK_DIR). CRITICAL: The agent MUST ask the user for explicit confirmation BEFORE calling this tool. Never call this without the user saying 'yes' or 'confirm'. This action is irreversible. Returns success status.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file to delete. Must start with / and be inside WORK_DIR.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "get_file_info": {
+      "name": "get_file_info",
+      "description": "Get detailed metadata about a file or directory without reading its content. Call this BEFORE read_text_file to check file size and avoid the 50KB limit error. Also useful for checking permissions, ownership, and modification times. DO NOT call this if you just need to check existence \u2014 use check_directory_exists instead. Returns size_bytes, permissions, owner, modification time, and type.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file or directory. Must start with /.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "get_file_checksum": {
+      "name": "get_file_checksum",
+      "description": "Calculate a cryptographic checksum of a file. Call this to verify file integrity after transfers or to compare two files. Returns the hex checksum string.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file. Must start with /.",
+            "pattern": "^/"
+          },
+          "algorithm": {
+            "type": "string",
+            "description": "Hash algorithm to use (default: sha256).",
+            "enum": [
+              "md5",
+              "sha1",
+              "sha256",
+              "sha512"
+            ]
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "get_current_user_info": {
+      "name": "get_current_user_info",
+      "description": "Get information about the current OS user \u2014 username, UID, home directory, and group memberships. Call this ONCE at session start if you need user identity. DO NOT call this repeatedly \u2014 the user doesn't change during a session. Returns username, uid, home_dir, primary_group, and all_groups.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    "get_user_groups": {
+      "name": "get_user_groups",
+      "description": "Get the groups and GIDs that a user belongs to. Call this to check shared directory access permissions. Usually not needed \u2014 get_current_user_info already includes groups. Returns primary_group and all groups with GIDs.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "OS username to look up. If not provided, uses the current user."
+          }
+        },
+        "required": []
+      }
+    },
+    "list_group_accessible_dirs": {
+      "name": "list_group_accessible_dirs",
+      "description": "List directories in common HPC root paths that the user can access via group permissions. Call this when the user needs to find their data directories on the cluster. DO NOT call this for routine file operations \u2014 use list_directory or find_files instead. Returns accessible directories grouped by root path.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "OS username. If not provided, uses the current user."
+          },
+          "level1_roots": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Root paths to scan (default: ['/home', '/data1', '/scratch', '/usersoftware', '/localscratch'])."
+          }
+        },
+        "required": []
+      }
+    },
+    "make_directory": {
+      "name": "make_directory",
+      "description": "Create a directory, including parent directories if needed. Call this before writing files to a new location. Safe to call on existing directories when exist_ok is true (default). Returns success status.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path for the new directory. Must start with /.",
+            "pattern": "^/"
+          },
+          "exist_ok": {
+            "type": "boolean",
+            "description": "If true (default), don't error if directory already exists."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "check_directory_exists": {
+      "name": "check_directory_exists",
+      "description": "Check if a directory exists at the given path. Call this for a quick existence check \u2014 returns true/false only, does NOT list contents. For checking if a directory has files inside it, use check_directory_has_files instead. Returns exists boolean.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to check. Must start with /.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "check_directory_has_files": {
+      "name": "check_directory_has_files",
+      "description": "Check if a directory exists AND contains any files or subdirectories. Call this to verify a directory is not empty \u2014 e.g. checking if weights are present, if output was generated, if uploads exist. More useful than check_directory_exists alone. Returns exists boolean, has_files boolean.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the directory. Must start with /.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "set_user_work_directory": {
+      "name": "set_user_work_directory",
+      "description": "Set and persist the user's work directory. Call this ONCE when the user first specifies their work directory or explicitly wants to change it. Validates the path exists, is a directory, and is writable. DO NOT call this if work_dir is already set in get_user_settings \u2014 only call when the user explicitly requests a change. Returns the validated work_dir path.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to an existing, writable directory. Must start with /.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "set_user_project_name": {
+      "name": "set_user_project_name",
+      "description": "Set or update the user's project name in persistent settings. Call this when the user specifies a project name. The name is used for organizing AlphaFold jobs and output directories. Returns the saved project_name.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project_name": {
+            "type": "string",
+            "description": "Short descriptive project name. Will be stripped of whitespace."
+          }
+        },
+        "required": [
+          "project_name"
+        ]
+      }
+    },
+    "list_recent_uploads": {
+      "name": "list_recent_uploads",
+      "description": "List files recently uploaded to work_dir/uploads/. Call this to discover files the user uploaded via the upload tool. Returns file paths that can be passed DIRECTLY to bio tools (e.g. prepare_af3_json_from_sequences, mutate_fasta). DO NOT read the content of uploaded FASTA files \u2014 pass their paths directly to the appropriate bio tool. Returns file paths, sizes, and upload times.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "work_dir": {
+            "type": "string",
+            "description": "User's work directory. If not provided, loads from user settings automatically.",
+            "pattern": "^/"
+          },
+          "hours": {
+            "type": "integer",
+            "description": "How far back to look in hours (default: 48).",
+            "minimum": 1,
+            "maximum": 720
+          },
+          "max_files": {
+            "type": "integer",
+            "description": "Maximum files to return (default: 20).",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": []
+      }
+    },
+    "read_file_lines": {
+      "name": "read_file_lines",
+      "description": "Read a specific range of lines from any file, no matter how large. Call this when you need a specific section of a large file (e.g. lines 100-200 of a log). Lines are 1-indexed. Memory-efficient \u2014 reads line-by-line. Output is capped at max_chars to prevent context overflow. Returns the line content with line numbers.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file. Must start with /.",
+            "pattern": "^/"
+          },
+          "start_line": {
+            "type": "integer",
+            "description": "First line to read, 1-indexed (default: 1).",
+            "minimum": 1
+          },
+          "end_line": {
+            "type": "integer",
+            "description": "Last line to read, inclusive (default: 50). Must be >= start_line.",
+            "minimum": 1
+          },
+          "max_chars": {
+            "type": "integer",
+            "description": "Maximum characters to return (default: 5000, hard ceiling: 10000).",
+            "minimum": 100,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "read_file_head": {
+      "name": "read_file_head",
+      "description": "Read the first N lines of any file, no matter how large. Call this to check file format, headers, column names, or structure of an unknown file. Memory-efficient. Output is capped to prevent context overflow. Returns head content with line numbers and total file line count.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file. Must start with /.",
+            "pattern": "^/"
+          },
+          "num_lines": {
+            "type": "integer",
+            "description": "Number of lines from the start (default: 50).",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "max_chars": {
+            "type": "integer",
+            "description": "Maximum characters to return (default: 5000, hard ceiling: 10000).",
+            "minimum": 100,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "read_file_tail": {
+      "name": "read_file_tail",
+      "description": "Read the last N lines of any file, no matter how large. Call this to check the end of log files, recent output, or job completion status. Memory-efficient \u2014 uses a sliding window. Output is capped to prevent context overflow. Returns tail content with line numbers.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file. Must start with /.",
+            "pattern": "^/"
+          },
+          "num_lines": {
+            "type": "integer",
+            "description": "Number of lines from the end (default: 50).",
+            "minimum": 1,
+            "maximum": 500
+          },
+          "max_chars": {
+            "type": "integer",
+            "description": "Maximum characters to return (default: 5000, hard ceiling: 10000).",
+            "minimum": 100,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "grep_file": {
+      "name": "grep_file",
+      "description": "Search for a regex pattern in any file, no matter how large. Call this to find specific content, error messages, function definitions, or patterns in large files. Returns matching lines with optional context. Memory-efficient \u2014 reads line-by-line. Returns matches with line numbers and total match count.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file. Must start with /.",
+            "pattern": "^/"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Python regex pattern to search for. Must be valid regex."
+          },
+          "max_matches": {
+            "type": "integer",
+            "description": "Maximum matches to return (default: 20, hard ceiling: 50).",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "context_lines": {
+            "type": "integer",
+            "description": "Lines of context before and after each match (default: 0).",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "max_chars_per_match": {
+            "type": "integer",
+            "description": "Max characters per match line (default: 500).",
+            "minimum": 50,
+            "maximum": 10000
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "description": "Whether search is case-sensitive (default: true)."
+          }
+        },
+        "required": [
+          "path",
+          "pattern"
+        ]
+      }
+    },
+    "count_pattern": {
+      "name": "count_pattern",
+      "description": "Count how many lines match a regex pattern in a file without returning any content. Call this to understand file composition before reading specific sections \u2014 e.g. count error lines, count FASTA headers, count function definitions. Returns ONLY the count \u2014 zero file content is returned. Memory-efficient.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file. Must start with /.",
+            "pattern": "^/"
+          },
+          "pattern": {
+            "type": "string",
+            "description": "Python regex pattern to count matches for."
+          },
+          "case_sensitive": {
+            "type": "boolean",
+            "description": "Whether search is case-sensitive (default: true)."
+          }
+        },
+        "required": [
+          "path",
+          "pattern"
+        ]
+      }
+    },
+    "get_file_overview": {
+      "name": "get_file_overview",
+      "description": "Get a quick structural overview of any file without reading the whole thing. Call this as the FIRST step when exploring an unknown or large file. Returns file size, total line count, first 5 lines, last 5 lines, and evenly-sampled lines from the middle. Works on files of any size (1KB to 10GB+). Memory-efficient.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file. Must start with /.",
+            "pattern": "^/"
+          },
+          "num_sample_lines": {
+            "type": "integer",
+            "description": "Number of evenly-spaced sample lines from the middle (default: 10).",
+            "minimum": 0,
+            "maximum": 50
+          },
+          "max_chars": {
+            "type": "integer",
+            "description": "Maximum total characters to return (default: 3000).",
+            "minimum": 100,
+            "maximum": 10000
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    },
+    "save_image": {
+      "name": "save_image",
+      "description": "Copy an image file to an organized location under work_dir/images/. Call this after generating plots, structure renderings, or visualizations to save them persistently. Validates the file is a recognized image format (.png, .jpg, .svg, etc.). Returns the saved image path.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "source_path": {
+            "type": "string",
+            "description": "Absolute path to the image file to save. Must start with /. Must be a recognized image format.",
+            "pattern": "^/"
+          },
+          "context_name": {
+            "type": "string",
+            "description": "Optional topic name for organizing (e.g. 'protein_analysis', 'cluster_report'). Uses current date if not provided."
+          },
+          "work_dir": {
+            "type": "string",
+            "description": "User's work directory. If not provided, loads from user settings.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "source_path"
+        ]
+      }
+    },
+    "list_saved_images": {
+      "name": "list_saved_images",
+      "description": "List previously saved images from work_dir/images/. Call this when the user asks to see their saved visualizations or plots. Returns image paths, sizes, contexts, and modification times.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "work_dir": {
+            "type": "string",
+            "description": "User's work directory. If not provided, loads from user settings.",
+            "pattern": "^/"
+          },
+          "context_name": {
+            "type": "string",
+            "description": "Optional \u2014 filter to a specific context subdirectory."
+          }
+        },
+        "required": []
+      }
+    },
+    "set_user_software_paths": {
+      "name": "set_user_software_paths",
+      "description": "Add or update software search path hints in the user's persistent settings. Call this AFTER installing software to a new location so future sessions can find it quickly. These are high-level directory hints (e.g. a conda_envs directory, a software root), NOT individual software entries. The agent uses these paths as the FIRST place to look when searching for installed software. This tool is for GENERIC software discovery only \u2014 specialized tools like AlphaFold have their own path management.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of absolute directory paths to add as software search hints. Each must start with /. Example: ['/data1/user/workdir/conda_envs', '/data1/user/workdir/software']. These are high-level directory hints, not individual software entries."
+          }
+        },
+        "required": [
+          "paths"
+        ]
+      }
+    }
+  },
+  "bio_processing": {
+    "mutate_fasta": {
+      "name": "mutate_fasta",
+      "description": "Apply a point mutation to a single-sequence FASTA file and save the result. Call this when the user wants to introduce a specific amino acid substitution (e.g. R175H, p.V600E). Takes a FILE PATH \u2014 reads the file directly to prevent sequence corruption. DO NOT pass file content as a string. Returns both the mutated content and the path to the saved mutated file.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "fasta_path": {
+            "type": "string",
+            "description": "Absolute path to the FASTA file on disk. Must start with /. Must contain exactly one sequence. This is a PATH, not sequence content.",
+            "pattern": "^/"
+          },
+          "mutation": {
+            "type": "string",
+            "description": "Mutation in format like R175H, p.V600E, M1A. The reference amino acid at the specified position must match the sequence."
+          }
+        },
+        "required": [
+          "fasta_path",
+          "mutation"
+        ]
+      }
+    },
+    "submit_alphafold3_job": {
+      "name": "submit_alphafold3_job",
+      "description": "Submit an AlphaFold3 structure prediction job to the Slurm cluster. Call this ONCE after prepare_af3_json_from_sequences has created the input JSON and weights have been confirmed. DO NOT call this if a job is already running for the same input. Before calling, verify: (1) input JSON file exists on disk, (2) weights directory contains .bin files, (3) work_dir is set. Returns slurm_job_id and job_dir.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "work_dir": {
+            "type": "string",
+            "description": "Absolute path to user's work directory. Must exist on disk.",
+            "pattern": "^/"
+          },
+          "weights_path": {
+            "type": "string",
+            "description": "Absolute path to AlphaFold3 weights directory. Must contain af3.bin or similar .bin files.",
+            "pattern": "^/"
+          },
+          "input_json_path": {
+            "type": "string",
+            "description": "Absolute path to the fold_input.json file created by prepare_af3_json_from_sequences. This is the PRIMARY parameter name.",
+            "pattern": "^/"
+          },
+          "job_name": {
+            "type": "string",
+            "description": "Short alphanumeric job name for Slurm queue (default: af3_job). No spaces.",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "project_dir": {
+            "type": "string",
+            "description": "If provided, organizes job under project_dir/jobs/<job_name>_<date>/.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "work_dir",
+          "weights_path",
+          "input_json_path"
+        ]
+      }
+    },
+    "prepare_af3_json_from_sequences": {
+      "name": "prepare_af3_json_from_sequences",
+      "description": "Create the AlphaFold3 fold_input.json from a FASTA file. THIS IS THE ONLY TOOL FOR GENERATING ALPHAFOLD3 INPUT JSON \u2014 never write JSON manually. Takes a FASTA FILE PATH \u2014 reads sequences directly to prevent corruption. Auto-detects protein/DNA/RNA per chain. Auto-assigns chain IDs (A, B, C...). Call this ONCE after confirming the FASTA file exists. Returns the saved JSON path and a preview.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "fasta_path": {
+            "type": "string",
+            "description": "Absolute path to a FASTA file. Must start with /. This is a PATH, not sequence content. The tool reads the file directly to prevent corruption.",
+            "pattern": "^/"
+          },
+          "name": {
+            "type": "string",
+            "description": "Job name for the JSON (default: cancer_model). Short alphanumeric, no spaces.",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "output_path": {
+            "type": "string",
+            "description": "Absolute path where to save the JSON. If not provided, uses project_dir/inputs/fold_input.json.",
+            "pattern": "^/"
+          },
+          "project_dir": {
+            "type": "string",
+            "description": "Project directory \u2014 saves to project_dir/inputs/fold_input.json if output_path not given.",
+            "pattern": "^/"
+          },
+          "ligands": {
+            "type": "string",
+            "description": "JSON string for ligands. Format: '[{\"id\": \"B\", \"ccdCodes\": [\"ATP\"]}]'. Default: '[]' (no ligands)."
+          }
+        },
+        "required": [
+          "fasta_path"
+        ]
+      }
+    },
+    "get_wildtype_protein_sequence": {
+      "name": "get_wildtype_protein_sequence",
+      "description": "Fetch the wild-type protein sequence from UniProt by gene symbol and save it as a FASTA file. Call this when the user needs a reference sequence for mutation modeling. Returns the file PATH \u2014 pass this path directly to apply_protein_variants or prepare_af3_json_from_sequences. DO NOT read the returned FASTA content with read_text_file \u2014 use the fasta_path directly.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "gene_symbol": {
+            "type": "string",
+            "description": "Gene symbol like TP53, BRAF, EGFR. Case-insensitive but uppercase preferred."
+          },
+          "organism": {
+            "type": "string",
+            "description": "Species name (default: 'Homo sapiens')."
+          },
+          "use_canonical": {
+            "type": "boolean",
+            "description": "Whether to prefer the canonical isoform (default: true)."
+          }
+        },
+        "required": [
+          "gene_symbol"
+        ]
+      }
+    },
+    "apply_protein_variants": {
+      "name": "apply_protein_variants",
+      "description": "Apply one or more HGVS protein changes to a wild-type FASTA file and save mutated FASTAs. Call this after get_wildtype_protein_sequence to create mutant sequences for structure prediction. Takes a FILE PATH \u2014 reads the file directly to prevent sequence corruption. DO NOT pass file content. Returns mutated_fasta_path for each successful mutation.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "wildtype_fasta_path": {
+            "type": "string",
+            "description": "Absolute path to the wild-type FASTA file. Must start with /. Must contain exactly one sequence. This is a PATH, not content.",
+            "pattern": "^/"
+          },
+          "variants_hgvsp": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "List of HGVS protein changes, e.g. ['p.V600E', 'p.R175H']. Only simple substitutions (p.X123Y) supported."
+          }
+        },
+        "required": [
+          "wildtype_fasta_path",
+          "variants_hgvsp"
+        ]
+      }
+    },
+    "inspect_vcf_summary": {
+      "name": "inspect_vcf_summary",
+      "description": "Get a quick overview of a VCF file \u2014 variant count, affected genes, and variant types. Call this as the FIRST step when the user provides a VCF file. Follow up with extract_coding_variants for detailed analysis.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "vcf_path": {
+            "type": "string",
+            "description": "Absolute path to the VCF file. Must start with /.",
+            "pattern": "^/"
+          },
+          "min_qual": {
+            "type": "number",
+            "description": "Minimum quality score to include a variant (default: 20.0).",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "vcf_path"
+        ]
+      }
+    },
+    "extract_coding_variants": {
+      "name": "extract_coding_variants",
+      "description": "Extract coding variants (missense, nonsense) from a VCF file with optional gene filtering. Call this after inspect_vcf_summary to get specific variants for structure modeling.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "vcf_path": {
+            "type": "string",
+            "description": "Absolute path to the VCF file. Must start with /.",
+            "pattern": "^/"
+          },
+          "gene_filter": {
+            "type": "string",
+            "description": "Optional gene symbol to filter by (e.g. 'BRAF', 'TP53')."
+          },
+          "max_return": {
+            "type": "integer",
+            "description": "Maximum variants to return (default: 10).",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "vcf_path"
+        ]
+      }
+    },
+    "extract_h5ad_summary": {
+      "name": "extract_h5ad_summary",
+      "description": "Get a basic summary of a single-cell .h5ad file \u2014 cell count, gene count, and available metadata columns. Call this as the FIRST step when exploring a new .h5ad dataset.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "h5ad_path": {
+            "type": "string",
+            "description": "Absolute path to the .h5ad file. Must start with /.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "h5ad_path"
+        ]
+      }
+    },
+    "list_obs_columns": {
+      "name": "list_obs_columns",
+      "description": "List all metadata column names available in adata.obs of a .h5ad file. Call this to discover what cell annotations are available before querying specific columns.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "h5ad_path": {
+            "type": "string",
+            "description": "Absolute path to the .h5ad file. Must start with /.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "h5ad_path"
+        ]
+      }
+    },
+    "get_unique_values": {
+      "name": "get_unique_values",
+      "description": "Get all unique values and their counts from a specific column in adata.obs. Call this to explore the distribution of a metadata column (e.g. cell types, clusters).",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "h5ad_path": {
+            "type": "string",
+            "description": "Absolute path to the .h5ad file. Must start with /.",
+            "pattern": "^/"
+          },
+          "column": {
+            "type": "string",
+            "description": "Column name as a string (e.g. 'cell_type', 'leiden'). Must be an exact match."
+          }
+        },
+        "required": [
+          "h5ad_path",
+          "column"
+        ]
+      }
+    },
+    "get_top_n_categories": {
+      "name": "get_top_n_categories",
+      "description": "Get the top N most frequent categories in an obs column. Call this for a quick summary of the most common cell types or clusters.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "h5ad_path": {
+            "type": "string",
+            "description": "Absolute path to the .h5ad file. Must start with /.",
+            "pattern": "^/"
+          },
+          "column": {
+            "type": "string",
+            "description": "Column name as a string (e.g. 'cell_type')."
+          },
+          "n": {
+            "type": "integer",
+            "description": "Number of top categories to return (default: 10).",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "required": [
+          "h5ad_path",
+          "column"
+        ]
+      }
+    },
+    "summarize_cell_types": {
+      "name": "summarize_cell_types",
+      "description": "Auto-detect and summarize cell-type-related columns in a .h5ad file. Call this for a quick overview of cell annotations.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "h5ad_path": {
+            "type": "string",
+            "description": "Absolute path to the .h5ad file. Must start with /.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "h5ad_path"
+        ]
+      }
+    }
+  },
+  "slurm_management": {
+    "slurm_monitor_job": {
+      "name": "slurm_monitor_job",
+      "description": "Check the current status of a Slurm job. Call this to check if a submitted job is still running, completed, or failed. Returns immediately \u2014 does NOT wait for the job to finish. Call this periodically to poll job status. Returns status (PENDING/RUNNING/COMPLETED/FAILED/CANCELLED), elapsed time, job name, partition, allocated CPUs, max RSS memory, exit code, node list, and success boolean.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "description": "Numeric Slurm job ID returned by a submit tool.",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      }
+    },
+    "slurm_cancel_job": {
+      "name": "slurm_cancel_job",
+      "description": "Cancel a running or pending Slurm job. Call this ONLY when the user explicitly requests cancellation. DO NOT call this without user confirmation. Returns success status.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "job_id": {
+            "type": "integer",
+            "description": "Numeric Slurm job ID to cancel.",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "job_id"
+        ]
+      }
+    },
+    "query_slurm_cluster": {
+      "name": "query_slurm_cluster",
+      "description": "Query the IRIS HPC cluster to discover current partitions, GPU types, node availability, and resource limits. Call this BEFORE submitting a job to understand what resources are available right now. Also call this when the user asks about cluster status, available GPUs, or partition info. DO NOT call this repeatedly in the same conversation \u2014 call once and reuse the results. Returns structured data about all accessible partitions, their time limits, GPU types, and node availability.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "include_node_details": {
+            "type": "boolean",
+            "description": "If true, also return per-node state info (default: false). Only set true when diagnosing why a specific job is not running."
+          }
+        },
+        "required": []
+      }
+    },
+    "check_user_slurm_access": {
+      "name": "check_user_slurm_access",
+      "description": "Check which Slurm partitions and accounts a user has access to, their current resource usage vs limits, and fairshare score. Call this BEFORE submitting a job for a specific user to verify they can use the requested partition. Also call this when a user asks 'what partitions can I use?' or 'why was my job rejected?'. DO NOT guess partition access \u2014 always verify with this tool first. Returns user's accounts, accessible partitions, QOS limits, current jobs, and fairshare.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "OS username to check. If empty, checks the current user."
+          }
+        },
+        "required": []
+      }
+    },
+    "submit_slurm_job": {
+      "name": "submit_slurm_job",
+      "description": "Submit a custom Slurm job with full resource control. Call this to submit any job to the cluster with specific CPU, memory, GPU, time, and partition requirements. BEFORE calling this, call query_slurm_cluster to discover available partitions and GPU types, and check_user_slurm_access to verify the user can access the target partition. DO NOT guess partition names or GPU types \u2014 always query first. The cluster's job_submit plugin automatically sets account and QOS based on partition, so do NOT set those manually. Returns job_id, script_path, and submission details.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "script_content": {
+            "type": "string",
+            "description": "The shell commands to run (the body of the job script, NOT including #SBATCH lines \u2014 those are generated automatically). Must be non-empty."
+          },
+          "job_name": {
+            "type": "string",
+            "description": "Short descriptive name for the job (default: 'irisai_job'). Alphanumeric, underscores, hyphens only.",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "partition": {
+            "type": "string",
+            "description": "Slurm partition name. If empty, Slurm uses the cluster default. The cluster's job_submit plugin auto-redirects GPU jobs to GPU partitions and CPU jobs to CPU partitions."
+          },
+          "time_limit": {
+            "type": "string",
+            "description": "Maximum wall time in HH:MM:SS or D-HH:MM:SS format. If empty, the partition default applies (typically 2 hours). Must not exceed the partition's MaxTime."
+          },
+          "cpus": {
+            "type": "integer",
+            "description": "CPUs per task (default: 1).",
+            "minimum": 1,
+            "maximum": 128
+          },
+          "memory": {
+            "type": "string",
+            "description": "Memory per node, e.g. '4G', '64G', '500G'. If empty, Slurm uses DefMemPerCPU * cpus (typically 2GB per CPU). Memory limits are enforced \u2014 jobs exceeding allocation are OOM-killed."
+          },
+          "gpus": {
+            "type": "integer",
+            "description": "Number of GPUs to request (default: 0). If >0 and no partition specified, the cluster auto-redirects to a GPU partition.",
+            "minimum": 0,
+            "maximum": 8
+          },
+          "gpu_type": {
+            "type": "string",
+            "description": "Specific GPU type. Must match GRES names from query_slurm_cluster. If empty, any available GPU type is used."
+          },
+          "nodes": {
+            "type": "integer",
+            "description": "Number of nodes (default: 1). Only increase for multi-node MPI jobs.",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "tasks_per_node": {
+            "type": "integer",
+            "description": "Tasks per node (default: 1). For MPI jobs, set to the number of ranks per node.",
+            "minimum": 1,
+            "maximum": 128
+          },
+          "array": {
+            "type": "string",
+            "description": "Job array specification, e.g. '1-100', '1-100%10' (max 10 concurrent). Empty means no array."
+          },
+          "work_dir": {
+            "type": "string",
+            "description": "Working directory for the job. If empty, uses the user's current work directory.",
+            "pattern": "^/"
+          },
+          "additional_sbatch": {
+            "type": "string",
+            "description": "Extra #SBATCH lines to include verbatim, one per line. For advanced options not covered by other parameters."
+          }
+        },
+        "required": [
+          "script_content"
+        ]
+      }
+    }
+  },
+  "code_execution": {
+    "execute_dynamic_task": {
+      "name": "execute_dynamic_task",
+      "description": "Execute shell commands directly in the current container environment. Call this for computational tasks like running scripts, installing packages, data processing, or any shell command that completes quickly. Commands run in an isolated task directory. Output is captured and returned (truncated if >30K chars). DO NOT use this for tasks that need GPU or long runtimes \u2014 use create_slurm_dynamic_task instead. Returns stdout, stderr, return_code, and task_dir.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "commands": {
+            "type": "string",
+            "description": "Shell commands as a SINGLE STRING. Multiple commands separated by newlines or &&. Will be executed via bash. Do NOT pass a list \u2014 pass a string."
+          },
+          "work_dir": {
+            "type": "string",
+            "description": "Working directory base. If not provided, uses WORK_DIR environment variable.",
+            "pattern": "^/"
+          },
+          "timeout": {
+            "type": "integer",
+            "description": "Maximum execution time in seconds (default: 3600 = 1 hour).",
+            "minimum": 10,
+            "maximum": 86400
+          },
+          "task_name": {
+            "type": "string",
+            "description": "Descriptive name for the task directory (default: 'dynamic_task'). Alphanumeric and underscores.",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          }
+        },
+        "required": [
+          "commands"
+        ]
+      }
+    },
+    "create_slurm_dynamic_task": {
+      "name": "create_slurm_dynamic_task",
+      "description": "Submit shell commands as a Slurm job on the HPC cluster. Call this for tasks that need dedicated resources (GPU, high memory, long runtime >1 hour). Uses a container for isolation. DO NOT use this for quick tasks that complete in seconds \u2014 use execute_dynamic_task instead. Returns slurm_job_id and task_dir. Use slurm_monitor_job to check status.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "commands": {
+            "type": "string",
+            "description": "Shell commands as a SINGLE STRING. Will be executed inside a container on the cluster node."
+          },
+          "task_name": {
+            "type": "string",
+            "description": "Descriptive name for the Slurm job (default: 'dynamic_task'). Alphanumeric and underscores.",
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "cores": {
+            "type": "integer",
+            "description": "Number of CPU cores to request (default: 1).",
+            "minimum": 1,
+            "maximum": 128
+          },
+          "memory": {
+            "type": "string",
+            "description": "Memory to request, e.g. '4G', '16G', '400G' (default: '4G').",
+            "pattern": "^\\d+[GMK]$"
+          },
+          "time_limit": {
+            "type": "string",
+            "description": "Maximum wall time in HH:MM:SS format (default: '02:00:00').",
+            "pattern": "^\\d{2}:\\d{2}:\\d{2}$"
+          },
+          "work_dir": {
+            "type": "string",
+            "description": "Working directory base. If not provided, uses WORK_DIR environment variable.",
+            "pattern": "^/"
+          }
+        },
+        "required": [
+          "commands"
+        ]
+      }
+    }
+  },
+  "history_management": {
+    "get_checkpoint_status": {
+      "name": "get_checkpoint_status",
+      "description": "Get the current checkpoint status and list of completed tool calls for a user. Call this to check what steps have been completed in a multi-step workflow, enabling safe resumption without repeating work.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "OS username. Required."
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    "clear_checkpoints": {
+      "name": "clear_checkpoints",
+      "description": "Clear all saved checkpoints for a user to start fresh. Call this when the user wants to abandon a previous workflow and start over. DO NOT call this without user confirmation \u2014 it erases progress.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "OS username. Required."
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    "find_recent_tasks": {
+      "name": "find_recent_tasks",
+      "description": "Find recently saved tasks for a user. Call this when the user wants to resume or continue previous work. Returns task summaries sorted by recency.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "description": "OS username. Required."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum tasks to return (default: 5).",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "username"
+        ]
+      }
+    },
+    "load_task_details": {
+      "name": "load_task_details",
+      "description": "Load detailed information about a specific saved task. Call this after find_recent_tasks when the user selects a task to resume.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task identifier from find_recent_tasks."
+          },
+          "username": {
+            "type": "string",
+            "description": "OS username. Required."
+          }
+        },
+        "required": [
+          "task_id",
+          "username"
+        ]
+      }
+    },
+    "resume_task": {
+      "name": "resume_task",
+      "description": "Resume execution of a previously saved task from its last checkpoint. Call this after load_task_details confirms the task state. Continues from where the task left off \u2014 does NOT restart from the beginning.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "Task identifier to resume."
+          },
+          "username": {
+            "type": "string",
+            "description": "OS username. Required."
+          },
+          "additional_context": {
+            "type": "string",
+            "description": "Optional additional context for the resumed task."
+          }
+        },
+        "required": [
+          "task_id",
+          "username"
+        ]
+      }
+    },
+    "save_conversation_history": {
+      "name": "save_conversation_history",
+      "description": "Save the current conversation messages to a persistent file. Call this at the end of a conversation or when the user asks to save progress.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "description": "List of conversation messages to save."
+          }
+        },
+        "required": [
+          "messages"
+        ]
+      }
+    },
+    "load_conversation_history": {
+      "name": "load_conversation_history",
+      "description": "Load previously saved conversation history from disk. Call this at the start of a session to restore context from a previous conversation.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    "clear_conversation_history": {
+      "name": "clear_conversation_history",
+      "description": "Clear the user's saved conversation history. Call this ONLY when the user explicitly asks to clear history. DO NOT call without confirmation \u2014 this is irreversible.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    "get_conversation_history_summary": {
+      "name": "get_conversation_history_summary",
+      "description": "Get a summary of the user's conversation history without loading all messages. Call this to check if there is previous context available before loading the full history.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    "export_conversation_history": {
+      "name": "export_conversation_history",
+      "description": "Export the current conversation history to a file in text or JSON format. Call this when the user wants a copy of their conversation.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "format_type": {
+            "type": "string",
+            "description": "Export format (default: 'text').",
+            "enum": [
+              "text",
+              "json"
+            ]
+          }
+        },
+        "required": []
+      }
+    },
+    "get_recent_conversation_context": {
+      "name": "get_recent_conversation_context",
+      "description": "Get the last N messages from conversation history for context. Call this to retrieve recent context without loading the entire history.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message_count": {
+            "type": "integer",
+            "description": "Number of recent messages to retrieve (default: 5).",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "message_count"
+        ]
+      }
+    },
+    "emergency_save_current_session": {
+      "name": "emergency_save_current_session",
+      "description": "Emergency save when normal conversation saving fails. Call this as a fallback if save_conversation_history returns an error.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "description": "List of conversation messages to emergency-save."
+          },
+          "error_info": {
+            "type": "string",
+            "description": "Optional error information about why normal save failed."
+          }
+        },
+        "required": [
+          "messages"
+        ]
+      }
+    },
+    "list_all_conversation_files": {
+      "name": "list_all_conversation_files",
+      "description": "List all saved conversation files with metadata. Call this when the user wants to browse their past conversations.",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      }
+    },
+    "search_conversation_files": {
+      "name": "search_conversation_files",
+      "description": "Search through all saved conversation files for specific keywords. Call this when the user wants to find a past conversation about a specific topic.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search keyword or phrase to find in past conversations."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum results to return (default: 5).",
+            "minimum": 1,
+            "maximum": 20
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    "get_specific_conversation_summary": {
+      "name": "get_specific_conversation_summary",
+      "description": "Get a detailed summary of a specific saved conversation file. Call this after list_all_conversation_files when the user selects a conversation to review.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "Filename of the conversation file to summarize."
+          }
+        },
+        "required": [
+          "filename"
+        ]
+      }
+    },
+    "export_specific_conversation": {
+      "name": "export_specific_conversation",
+      "description": "Export a specific past conversation file in readable format. Call this when the user wants a copy of a particular past conversation.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "description": "Filename of the conversation to export."
+          },
+          "format_type": {
+            "type": "string",
+            "description": "Export format (default: 'text').",
+            "enum": [
+              "text",
+              "json"
+            ]
+          }
+        },
+        "required": [
+          "filename"
+        ]
+      }
+    }
+  }
+}

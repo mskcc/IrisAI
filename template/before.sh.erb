@@ -1,0 +1,76 @@
+# ── IrisAI Application Settings ──
+export IRISAI_APP_NAME="IrisAIdev"
+export APP_DIR="/home/${USER}/ondemand/dev/${IRISAI_APP_NAME}"
+export LITELLM_API_BASE="${LITELLM_API_BASE:-http://localhost:8080}"
+export LITELLM_URL="${LITELLM_API_BASE}"
+
+# Find available port to run server on
+
+# Job limiting: Create lock file to prevent multiple sessions
+export LOCK_DIR="/home/${USER}/${IRISAI_APP_NAME:-IrisAIdev}/tmp/irisai_locks"
+export LOCK_FILE="${LOCK_DIR}/${USER}_irisai.lock"
+
+# Create lock directory if it doesn't exist
+mkdir -p "$LOCK_DIR"
+
+# Check if lock file exists and is from a running job
+if [ -f "$LOCK_FILE" ]; then
+    EXISTING_JOB_ID=$(cat "$LOCK_FILE")
+    # Check if the job is still running
+    if squeue -j "$EXISTING_JOB_ID" &>/dev/null; then
+        echo "ERROR: Another IrisAI session is already running (Job ID: $EXISTING_JOB_ID)"
+        echo "Please wait for it to complete or cancel it before starting a new session."
+        exit 1
+    else
+        # Clean up stale lock file
+        rm -f "$LOCK_FILE"
+    fi
+fi
+
+port=$(find_port ${host})
+
+
+# Find available ports for MCP. Add here if we need to add more MCP servers
+mcp_file_port=$(find_port ${host})
+mcp_git_port=$(find_port ${host})
+mcp_bio_process_port=$(find_port ${host})
+mcp_slurm_port=$(find_port ${host})
+mcp_history_port=$(find_port ${host})
+mcp_code_execution_port=$(find_port ${host})
+searxng_nginx_port=$(find_port ${host})
+
+export MCP_FILE_PORT=${mcp_file_port}
+export MCP_GIT_PORT=${mcp_git_port}
+export MCP_BIO_PROCESS_PORT=${mcp_bio_process_port}
+export MCP_SLURM_PORT=${mcp_slurm_port}
+export MCP_HISTORY_PORT=${mcp_history_port}
+export MCP_CODE_EXECUTION_PORT=${mcp_code_execution_port}
+export SEARXNG_NGINX_PORT=${searxng_nginx_port}
+
+# No need to change anything below
+
+export NODE_SERVER_PORT=${port}
+export COOKIE_SAMESITE="none"
+export COOKIE_SECURE=false
+export ALLOW_INSECURE_COOKIES=true
+export password="$(create_passwd 32)"
+export CHAINLIT_AUTH_SECRET=${password}
+export CHAINLIT_COOKIE_PATH="/node/${host}/${port}"
+
+export mcp_shared_api_key="$(create_passwd 32)"
+export SEARXNG_TOKEN="$(create_passwd 32)"
+export MCP_SHARED_BEARER_TOKEN=${mcp_shared_api_key}
+
+export MCP_CONFIG_PATH="${APP_DIR}/config/mcp_servers.yaml"
+export ENV="dev"
+
+# Use standard $USER (most common and sufficient)
+USERNAME="${USER}"
+
+# Fallback to whoami if $USER is unset (rare)
+[[ -z "$USERNAME" ]] && USERNAME="$(whoami)"
+
+export username="${USERNAME}"
+
+echo "IrisAI session starting with Job ID: $SLURM_JOB_ID"
+echo "Lock file created at: $LOCK_FILE"

@@ -1,0 +1,21 @@
+servers:
+  - name: file_ops
+    env_port_var: MCP_FILE_PORT
+    default_port: 8001
+    description: "File listing, reading, searching"
+
+  - name: bio_processing
+    env_port_var: MCP_BIO_PROCESS_PORT
+    default_port: 8004
+    description: "Bioinformatics analysis & plotting"
+
+  - name: slurm_management
+    env_port_var: MCP_SLURM_PORT
+    default_port: 8003
+    description: "Slurm job submission, monitoring, cancellation"
+
+
+  - name: code_execution
+    env_port_var: MCP_CODE_EXECUTION_PORT
+    default_port: 8005
+    description: "Dynamic Code Execution Server"

@@ -1,0 +1,185 @@
+Bootstrap: docker
+From: rockylinux:8.9
+
+%files
+  /admin/isvslurm/rpms/*.rpm /root/
+  /etc/munge/munge.key /root/munge.key
+  /usr/share/lmod/lmod/init/.modulespath /root/modulespath
+  ${APP_DIR}/mcptool001.yml /root/mcptool001.yml
+
+%post
+  # User setup for Slurm compatibility
+  useradd munge -u 600
+  useradd slurm -u 601
+  
+  # Enable repositories (Rocky 8.9 specific)
+  dnf install -y epel-release
+  dnf config-manager --set-enabled powertools
+  
+  # Install system dependencies via DNF
+  dnf groupinstall -y 'Development Tools'
+  dnf install -y \
+    git curl wget rsync \
+    gcc gcc-c++ make cmake \
+    openssl-devel libffi-devel \
+    zlib-devel bzip2-devel \
+    sqlite-devel readline-devel \
+    tk-devel gdbm-devel \
+    xz-devel expat-devel \
+    libuuid-devel ncurses-devel \
+    libX11-devel libXext-devel \
+    libXrender-devel libICE-devel \
+    libSM-devel fontconfig-devel \
+    freetype-devel libpng-devel \
+    libjpeg-turbo-devel \
+    hdf5-devel \
+    lapack-devel blas-devel \
+  
+  # Install Slurm RPMs
+  dnf -y install /root/*.rpm
+  
+  # Munge setup
+  chown -R root:munge /etc/munge /var/log/munge /var/lib/munge /var/run/munge
+  chmod 1770 /etc/munge /var/log/munge /var/lib/munge
+  chmod 1775 /var/run/munge
+  ln -s /tmp/munge /var/log/munge
+  cp /root/munge.key /etc/munge/munge.key
+  chmod 0400 /etc/munge/munge.key
+  chown root:munge /etc/munge/munge.key
+  
+  # Lmod setup
+  mkdir -p /usr/share/lmod/lmod/init/
+  mv /root/modulespath /usr/share/lmod/lmod/init/.modulespath
+  chmod 644 /usr/share/lmod/lmod/init/.modulespath
+  chown root:root /usr/share/lmod/lmod/init/.modulespath
+  
+  # Link Slurm config (runtime mount)
+  ln -s /admin/isvslurm/etc/slurm /etc/slurm
+  
+  # Install Miniforge using the verified GitHub URL
+  echo "Downloading Miniforge..."
+  curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
+  
+  # Verify download succeeded
+  if [[ ! -f "Miniforge3-$(uname)-$(uname -m).sh" ]]; then
+    echo "ERROR: Failed to download Miniforge"
+    exit 1
+  fi
+  
+  # Install Miniforge
+  bash "Miniforge3-$(uname)-$(uname -m).sh" -b -p /opt/miniforge3
+  rm "Miniforge3-$(uname)-$(uname -m).sh"
+  
+  # Initialize conda for bash
+  /opt/miniforge3/bin/conda init bash
+  
+  # Create environment from your existing YAML file
+  /opt/miniforge3/bin/conda env create -f /root/mcptool001.yml -p /opt/miniforge3/envs/mcptool001
+  
+  # Create the MCP server launcher script
+  cat > /opt/start_mcp_servers.sh << 'EOF'
+#!/bin/bash
+
+# Activate conda environment
+source /opt/miniforge3/bin/activate mcptool001
+
+# Directory containing MCP server scripts
+MCP_SERVERS_DIR="/external/mcp_servers"
+WORK_DIR="${WORK_DIR}"
+
+# Check if directory exists
+if [[ ! -d "$MCP_SERVERS_DIR" ]]; then
+    echo "ERROR: MCP servers directory not found: $MCP_SERVERS_DIR"
+    exit 1
+fi
+
+if [[ ! -d "$WORK_DIR" ]]; then
+    echo "ERROR: Work directory not found: $WORK_DIR"
+    exit 1
+fi
+
+# Test work directory permissions
+if [[ ! -w "$WORK_DIR" ]]; then
+    echo "ERROR: Work directory is not writable: $WORK_DIR"
+    exit 1
+fi
+
+echo "Work directory: $WORK_DIR"
+echo "MCP servers directory: $MCP_SERVERS_DIR"
+
+# Array to store background process PIDs
+declare -a pids=()
+
+# Function to cleanup background processes
+cleanup() {
+    echo "Shutting down MCP servers..."
+    for pid in "${pids[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "Stopping process $pid"
+            kill "$pid"
+        fi
+    done
+    wait
+    echo "All MCP servers stopped."
+}
+
+# Set up signal handlers
+trap cleanup SIGTERM SIGINT
+
+echo "Starting MCP servers from directory: $MCP_SERVERS_DIR"
+
+# Find and start all Python files in the mcp_servers directory
+for script in "$MCP_SERVERS_DIR"/*.py; do
+    if [[ -f "$script" ]]; then
+        script_name=$(basename "$script")
+        echo "Starting MCP server: $script_name"
+        
+        # Start the script in background
+        WORK_DIR="$WORK_DIR" python "$script" &
+        pid=$!
+        pids+=($pid)
+        
+        echo "Started $script_name with PID: $pid"
+        
+        # Small delay between starts
+        sleep 2
+    fi
+done
+
+if [[ ${#pids[@]} -eq 0 ]]; then
+    echo "No MCP server scripts found in $MCP_SERVERS_DIR"
+    exit 1
+fi
+
+echo "All MCP servers started. PIDs: ${pids[*]}"
+echo "Waiting for servers to finish..."
+
+# Wait for all background processes
+wait
+
+echo "All MCP servers have exited."
+EOF
+
+  chmod +x /opt/start_mcp_servers.sh
+  
+  # Clean up
+  dnf clean all
+  /opt/miniforge3/bin/conda clean -afy
+  rm /root/mcptool001.yml
+
+%environment
+  export PATH="/opt/miniforge3/bin:$PATH"
+  export CONDA_PREFIX="/opt/miniforge3"
+  # Set environment variables for MCP servers
+  export MCP_FILE_PORT="${MCP_FILE_PORT:-8001}"
+  export MCP_BIO_PROCESS_PORT="${MCP_BIO_PROCESS_PORT:-8004}"
+  export MCP_SLURM_PORT="${MCP_SLURM_PORT:-8003}"
+
+%runscript
+  # Default: activate environment and run command
+  source /opt/miniforge3/bin/activate mcptool001
+  exec "$@"
+
+%startscript
+  # For daemon mode - start all MCP servers dynamically
+  exec /opt/start_mcp_servers.sh

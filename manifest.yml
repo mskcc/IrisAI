@@ -1,0 +1,6 @@
+---
+name: IrisAI Dev
+category: Interactive Apps
+role: batch_connect
+description: |
+  This app will launch a simple IrisAI Dev interface.

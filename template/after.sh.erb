@@ -1,0 +1,30 @@
+# Wait for the Gradio server to start
+echo "Waiting for Chatui bot server to open port ${port}..."
+if wait_until_port_used "${host}:${port}" 600; then
+  echo "Discovered Chatui bot server listening on port ${port}!"
+else
+  echo "Timed out waiting for Chatui bot server to open port ${port}!"
+  clean_up 1
+fi
+sleep 2
+
+# Cleanup function to remove lock file when job ends
+cleanup_job_lock() {
+    LOCK_DIR="/home/${USER}/${IRISAI_APP_NAME:-IrisAIdev}/tmp/irisai_locks"
+    LOCK_FILE="${LOCK_DIR}/${USER}_irisai.lock"
+
+    if [ -f "$LOCK_FILE" ]; then
+        LOCK_JOB_ID=$(cat "$LOCK_FILE")
+        if [ "$LOCK_JOB_ID" = "$SLURM_JOB_ID" ]; then
+            rm -f "$LOCK_FILE"
+            echo "Removed job lock: $LOCK_FILE for Job ID: $SLURM_JOB_ID"
+        else
+            echo "Warning: Lock file contains different Job ID ($LOCK_JOB_ID vs $SLURM_JOB_ID)"
+        fi
+    fi
+}
+
+# Set trap to cleanup on exit
+trap cleanup_job_lock EXIT SIGTERM SIGINT
+
+echo "Job lock cleanup handler registered for Job ID: $SLURM_JOB_ID"

@@ -1,0 +1,34 @@
+# IrisAI Runtime Dependencies
+# Python >=3.11 required
+#
+# Note: Full deployment requires a LiteLLM proxy, Open OnDemand, and Slurm.
+# See docs/ARCHITECTURE.md for system requirements.
+
+# --- Core Framework ---
+chainlit>=2.5.0
+litellm>=1.80.0
+langchain-core>=1.4.0
+langchain-openai>=1.1.0
+openai>=1.0.0
+aiofiles>=24.0.0
+
+# --- MCP Server Framework ---
+fastmcp>=3.2.0
+
+# --- HTTP & Async ---
+aiohttp>=3.9.0
+httpx>=0.27.0
+
+# --- Data & Validation ---
+pydantic>=2.0.0
+pyyaml>=6.0
+
+# --- Tokenization ---
+tiktoken>=0.7.0
+
+# --- Scientific (used by MCP bio tools) ---
+numpy>=1.24.0
+pandas>=2.0.0
+matplotlib>=3.7.0
+h5py>=3.9.0
+biopython>=1.80
