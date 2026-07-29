@@ -1,11 +1,6 @@
 # IrisAI — AI-powered HPC Research Assistant
 
-[![Python](https://img.shields.io/badge/python-3.11-blue)]()
-[![LLM](https://img.shields.io/badge/LLM-Claude%20Sonnet%204%20%2F%20Opus%204%20%2F%20Haiku%204.5-purple)]()
-[![Skills](https://img.shields.io/badge/skills-33-orange)]()
-[![MCP Tools](https://img.shields.io/badge/MCP%20tools-65%2B-brightgreen)]()
-[![Models](https://img.shields.io/badge/models-6-blueviolet)]()
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11-blue)]() [![LLM](https://img.shields.io/badge/LLM-Claude%20Sonnet%204%20%2F%20Opus%204%20%2F%20Haiku%204.5-purple)]() [![Skills](https://img.shields.io/badge/skills-33-orange)]() [![MCP Tools](https://img.shields.io/badge/MCP%20tools-65%2B-brightgreen)]() [![Models](https://img.shields.io/badge/models-6-blueviolet)]() [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 AI-powered HPC research assistant — conversational interface for Slurm clusters, bioinformatics workflows, and scientific computing.
 
